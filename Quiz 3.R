@@ -10,17 +10,17 @@ training = segmentationOriginal[segmentationOriginal$Case == "Train",]
 testing = segmentationOriginal[segmentationOriginal$Case == "Test",]
 modelFit <- train(Class ~., method="rpart", data=training)
 modelFit$finalModel
-# a. PS
-# b. WS
-# c. PS
-# d. Not possible to predict
+"a. PS
+ b. WS
+ c. PS
+ d. Not possible to predict"
 
 
 # Question 2
 "With K-fold cross validation, the following is true:
  - The bias is smaller with increasing K
  - Variance increases with increasing K
- - Leave 1 out CV is K-Fold where K = the sample size."
+ - Leave-1-Out CV is the same as K-Fold CV where K = the sample size."
 
 
 # Question 3
@@ -28,8 +28,8 @@ load("/Users/brettromero/Documents/Coursera/Practical Machine Learning/olive.rda
 modelFit <- train(Area ~., method="rpart", data=olive)
 newdata = as.data.frame(t(colMeans(olive)))
 predict(modelFit, newdata)
-# 2.783282
-# Result is strange because the Area appears to be a factor variable
+" 2.783282
+  Result is strange because the Area appears to be a factor variable"
 
 
 # Question 4
@@ -41,21 +41,23 @@ trainSA = SAheart[train,]
 testSA = SAheart[-train,]
 str(trainSA)
 set.seed(13234)
-modelFit <- train(factor(chd) ~ age + alcohol + obesity + tobacco + typea + ldl
+modelFit <- train(chd ~ age + alcohol + obesity + tobacco + typea + ldl
+                  , data = trainSA
                   , method = "glm"
                   , family = "binomial"
-                  , data = trainSA)
+                  )
 
 missClass = function(values, prediction){
   sum(((prediction > 0.5)*1) != values)/length(values)
 }
 
-trainPred <- as.vector(predict(modelFit, trainSA[,-10]), mode = "numeric") - 1
+trainPred <- predict(modelFit, trainSA)
 missClass(trainSA$chd, trainPred)
-# 0.2727273
-testPred <- as.vector(predict(modelFit, testSA[,-10]), mode = "numeric") - 1
+" 0.2727273"
+testPred <- predict(modelFit, testSA[,-10])
 missClass(testSA$chd, testPred)
-# 0.3116883
+" 0.3116883"
+
 
 # Question 5 
 library(ElemStatLearn)
