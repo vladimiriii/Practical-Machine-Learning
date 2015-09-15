@@ -1,0 +1,14 @@
+---
+title: "Practical Machine Learning - Assignment"
+author: "Brett Romero"
+date: "27 September 2015"
+output: html
+---
+
+##Executive Summary##
+
+
+
+```{r}
+
+```
