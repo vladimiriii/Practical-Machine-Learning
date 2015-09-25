@@ -2,13 +2,179 @@
 title: "Practical Machine Learning - Assignment"
 author: "Brett Romero"
 date: "27 September 2015"
-output: html
+output: html_document
 ---
 
-##Executive Summary##
+##Introduction##
+This paper looks at the Weight Lifting Exercise Dataset and aims to build a model that can accurately predict the manner in which exercises were performed (as represented by 'classe'). The dataset contains measurements of movements taken from from participants as they perform an exercise by a range of sensors attached at different points of the body - namely the bicep, ankle, thigh and belt. Using these measurements, a range of models were constructed to predict the classe of the exercise with the best performing model being a Stochastic Gradient Boosting Machine. This model had an estimated out-of-bag error of just 0.35%. 
 
+##1. Understanding the Data##
+The first step undertaken was understanding the data. From the documentation, the following important information about the dataset was noted:
+ * The dataset represents the measurements of sensors attached to 6 participants as they performed 10 repetitions of the Unilateral Dumbbell Bicep Curl. 
+ * The participants were asked to perform the exercise using 5 different methods (shown in the classe field and represented by the letters A through E). The methods were 'to specification' (A), throwing the elbows to the front (B), lifting the dumbbell only halfway (C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E).
 
+##2. Loading in the Data##
+The next step in the process was loading in the training data. This was done by loading it directly from the specified website location. Immediately after loading the data, it was split into training and validation datasets.
 
 ```{r}
+require(caret, quietly = TRUE)
+rawTraining <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
+set.seed(1000)
+inTrain <- createDataPartition(rawTraining$classe, p = 0.75)[[1]]
+training <- rawTraining[ inTrain,]
+validation <- rawTraining[-inTrain,]
+```
 
+##3. Exploring the Data##
+In step three, exploration of the dataset was undertaken. There were four goals of this exploration:
+1. Identify any load related errors
+2. Search for fields/columns with missing values, NAs, blanks and so on
+3. Understand the structure of the dataset - are the fields numeric/categorical/mixed
+4. Observe any identifiable patterns or correlations within the dataset
+
+The following were the findings of the initial data assessment:
+ * Almost all the fields contain numerical values corresponding to the sensor readings, as described in the documentation.
+ * There were a large number of fields/columns containing almost entirely NAs and/or blanks. These appeared to align with the values in the 'new_window' field. When 'new_window' = 'no' (14,407 out 14,718 values), these fields were either NA or blank. When 'new_window' = 'yes', these fields had values.
+ * The dataset consisted almost entirely of numerical fields. There were also fields corresponding to timestamps, the 'new_window' field identified above, user names and unique IDs. 
+
+To assist with further understanding the dataset, the fields containing mostly NAs and blanks were removed, as well as X (the ID field), user_name, raw_timestamp_part_1, raw_timestamp_part_2, num_window and new_window. Finally, the remaining timestamp field cvtd_timestamp was converted into an hour of the day field for use in model building.
+
+```{r}
+# Remove fields with mostly NAs and Blanks
+training.no <- training[training$new_window == "no",]
+NonNACols <- training.no[,!as.vector(apply(is.na(training.no), 2, sum) == nrow(training.no))]
+ColsWithValues <- NonNACols[,as.vector(apply(NonNACols=="", 2, sum) < nrow(NonNACols))]
+cleanTrain <- training[,colnames(ColsWithValues)]
+
+#Remove Unneeded Fields
+cleanTrain <- cleanTrain[,-c(1, 2, 3, 4, 6, 7)]
+
+# Convert Timestamp into an Hour of Day Field
+cleanTrain$cvtd_timestamp <- as.numeric(substr(cleanTrain$cvtd_timestamp, 12, 13))
+```
+
+With the cleaned training dataset (cleanTrain), further exploration was then conducted. The main focus of this exploration was to identify if any of the numerical fields were highly correlated. This was done as follows:
+
+```{r}
+th <- 0.8 #Absolute threshold for "highly correlated"
+correlations <- cor(cleanTrain[,-54])
+results <- data.frame(var1 = as.character(), var2 = as.character())
+for (i in 1:ncol(correlations)-1) {
+  startRow <- i + 1
+  absCorValues <- as.vector(abs(correlations[c(startRow:nrow(correlations)),i]))
+  rawCorValues <- as.vector(correlations[c(startRow:nrow(correlations)),i])
+  if (sum(absCorValues >= th) > 0) {
+    var1 <- colnames(correlations)[i]
+    var2 <- rownames(correlations)[c(rep(FALSE, i), as.vector(absCorValues >= th))]
+    corr <- rawCorValues[absCorValues >= th]
+    results <- rbind(results, data.frame(var1 = c(rep(var1, length(var2))), var2, corr))
+  }
+}
+results
+```
+
+As the results above show, there are some very strong correlations - 19 with values greater than 0.8 (or less than -0.8). The roll_belt field and the accel_belt fields in particular appear to have high levels of correlations with a range of other variables. Generally, high levels correlation between movements of the same body part in different directions was also observed. Intuitively this makes sense as movements of those body parts are likely to occur along multiple axes, as opposed to purely along one axis. 
+
+##4. Data Pre-Processing##
+The fact there were a significant number of highly correlated fields in the dataset suggested that principal components analysis (pca) may be able to summarize the data effectively and reduce dimensionality. To assess this, the training dataset was pre-processed using the center, scale and pca methods. An original version of the training dataset was also maintained for comparison purposes.
+
+```{r}
+pcaPreProc <- preProcess(cleanTrain[,-54], method = c('center', 'scale', 'pca'), thresh = 0.9)
+pcaTrain <- predict(pcaPreProc, cleanTrain[,-54])
+pcaTrain <- data.frame(pcaTrain, classe = cleanTrain[,54])
+pcaPreProc
+```
+
+##5. Model Selection##
+In order to identify the best model, three different models were tested. The three models were Random Forest (method = rf), Stochastic Gradient Boosting Machine (method = gbm) and Penalized Multinomial Regression Model (method = "multinom"). All models were tested with both the preprocessed data 'pcaTraining' and the unprocessed data 'training'. In all cases, the accuracy of each model was validated using 10-fold cross validation.
+
+```{r}
+CV10 <- trainControl(method = "cv"
+                    , number = 10)
+```
+
+Due to the length of time needed to run the models, they have not all been included here. However, from the accuracy of the models, the Stochastic Gradient Boosting Machine (gbm) model using the unprocessed data produced the best results. It should also be noted that the Random Forest model (again using the unprocessed data) also achieved very high accuracy, but was just bettered by the gbm model.
+
+###Stochastic Gradient Boosting Machine Model###
+```{r}
+require(survival, quietly = TRUE)
+require(gbm, quietly = TRUE)
+require(plyr, quietly = TRUE)
+GBMParamGrid <- expand.grid(interaction.depth = c(2, 5, 10)
+                            , n.trees = c(100, 200, 500)
+                            , shrinkage = 0.1
+                            , n.minobsinnode = 10)
+
+GBMModelFit <- train(classe ~ .
+                     , method = "gbm"
+                     , trControl = CV10
+                     , tuneGrid = GBMParamGrid
+                     , data = cleanTrain
+                     , verbose = FALSE #gbm prints a lot of output if TRUE
+)
+GBMModelFit
+
+```
+
+As can be seen from the results above, the best gbm model had an accuracy of 99.51%. This corresponds to an error rate of just 0.49%.
+
+##6. Assess Variable Importance##
+To provide a quick validation of the model results, the variables used in the model were assessed for their importance to the accuracy of the model.
+
+```{r}
+varImp(GBMModelFit)
+```
+
+As can be seen from the results above, the two variables roll_belt and yaw_belt were by some margin the most significant variables used in the model. Another interesting observation is that movement of the dumbbell along both the y (vertical) and z (forward/backward) axes - but not the x (side to side) axis - provided the model with important information about the technique used. Looking at the exercise being performed (bicep curls) and the variations participants were asked to perform, this makes sense intuitively as none of the variations would require lateral movement of the dumbbell. 
+
+##7. Estimate Out-Of-Bag Error##
+After determining the best model and training data to use, the gbm model was then used on the validation dataset to estimate the out-of-bag error. The first step in this process was to repeat the cleaning process undertaken on the training dataset.
+
+```{r}
+# Remove fields with mostly NAs and Blanks
+validation.no <- validation[validation$new_window == "no",]
+NonNACols.val <- validation.no[,!as.vector(apply(is.na(validation.no), 2, sum) == nrow(validation.no))]
+ColsWithValues.val <- NonNACols.val[,as.vector(apply(NonNACols.val=="", 2, sum) < nrow(NonNACols.val))]
+cleanValidation <- validation[,colnames(ColsWithValues.val)]
+
+#Remove Unneeded Fields
+cleanValidation <- cleanValidation[,-c(1, 2, 3, 4, 6, 7)]
+
+# Convert Timestamp into an Hour of Day Field
+cleanValidation$cvtd_timestamp <- as.numeric(substr(cleanValidation$cvtd_timestamp, 12, 13))
+```
+
+After being cleaned, the best gbm model was applied to the cleaned validation data. 
+
+```{r}
+GBMPredictions <- predict(GBMModelFit, newdata=cleanValidation)
+confusionMatrix(GBMPredictions, cleanValidation$classe)
+```
+
+The resulting output (shown above) indicated an accuracy of 99.65% on the validation dataset. In fact, of the 4,904 rows in the validation dataset, only 17 were incorrectly predicted. This provided a high level of confidence that the model would accurately predict the classe for the 20 records in the test dataset. 
+
+##8. Predicting on the Testing Dataset##
+The final step was to predict the classe for the 20 records in the test dataset. Again, the first step is to load in the test data and subject it to the same cleaning as the training dataset.
+
+```{r}
+rawTest <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
+
+# Remove fields with mostly NAs and Blanks
+test.no <- rawTest[rawTest$new_window == "no",]
+NonNACols.test <- test.no[,!as.vector(apply(is.na(test.no), 2, sum) == nrow(test.no))]
+ColsWithValues.test <- NonNACols.test[,as.vector(apply(NonNACols.test=="", 2, sum) < nrow(NonNACols.test))]
+cleanTest <- rawTest[,colnames(ColsWithValues.test)]
+
+#Remove Unneeded Fields
+cleanTest <- cleanTest[,-c(1, 2, 3, 4, 6, 7)]
+
+# Convert Timestamp into an Hour of Day Field
+cleanTest$cvtd_timestamp <- as.numeric(substr(cleanTest$cvtd_timestamp, 12, 13))
+```
+
+The final step was then to make the predictions. 
+
+```{r}
+testPredictions <- predict(GBMModelFit, newdata=cleanTest)
+testPredictions
 ```
